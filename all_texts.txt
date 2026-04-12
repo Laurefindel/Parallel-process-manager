@@ -1,0 +1,8 @@
+===== a.txt =====
+alpha line
+
+
+===== b.txt =====
+beta line
+
+
