@@ -179,6 +179,33 @@ static int find_running_index(const RunningTask *running, size_t running_count, 
     return -1;
 }
 
+static int spawn_until_full(const char *worker_script,
+                            const Task *tasks,
+                            size_t task_count,
+                            size_t *next_task,
+                            const char *output_dir,
+                            RunningTask *running,
+                            size_t *running_count,
+                            size_t parallelism) {
+    while (*next_task < task_count && *running_count < parallelism) {
+        pid_t pid = spawn_worker(worker_script, tasks[*next_task].path, output_dir);
+        if (pid < 0) {
+            perror("fork worker");
+            return -1;
+        }
+
+        running[*running_count].pid = pid;
+        running[*running_count].task_index = *next_task;
+        fprintf(stdout, "[START] pid=%d file=%s\n", (int)pid, tasks[*next_task].path);
+        fflush(stdout);
+
+        (*running_count)++;
+        (*next_task)++;
+    }
+
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc < 7 || argc > 8) {
         fprintf(stderr,
@@ -223,20 +250,17 @@ int main(int argc, char **argv) {
     size_t running_count = 0;
     int worker_failures = 0;
 
-    while (next_task < task_count && running_count < (size_t)parallelism) {
-        pid_t pid = spawn_worker(worker_script, tasks[next_task].path, output_dir);
-        if (pid < 0) {
-            perror("fork worker");
-            break;
-        }
-
-        running[running_count].pid = pid;
-        running[running_count].task_index = next_task;
-        fprintf(stdout, "[START] pid=%d file=%s\n", (int)pid, tasks[next_task].path);
-        fflush(stdout);
-
-        running_count++;
-        next_task++;
+    if (spawn_until_full(worker_script,
+                         tasks,
+                         task_count,
+                         &next_task,
+                         output_dir,
+                         running,
+                         &running_count,
+                         (size_t)parallelism) != 0) {
+        free(running);
+        free_tasks(tasks, task_count);
+        return EXIT_FAILURE;
     }
 
     while (running_count > 0) {
@@ -269,20 +293,15 @@ int main(int argc, char **argv) {
             running_count--;
         }
 
-        while (next_task < task_count && running_count < (size_t)parallelism) {
-            pid_t pid = spawn_worker(worker_script, tasks[next_task].path, output_dir);
-            if (pid < 0) {
-                perror("fork worker");
-                break;
-            }
-
-            running[running_count].pid = pid;
-            running[running_count].task_index = next_task;
-            fprintf(stdout, "[START] pid=%d file=%s\n", (int)pid, tasks[next_task].path);
-            fflush(stdout);
-
-            running_count++;
-            next_task++;
+        if (spawn_until_full(worker_script,
+                             tasks,
+                             task_count,
+                             &next_task,
+                             output_dir,
+                             running,
+                             &running_count,
+                             (size_t)parallelism) != 0) {
+            break;
         }
     }
 
